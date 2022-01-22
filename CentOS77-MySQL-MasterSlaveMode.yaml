@@ -1,0 +1,229 @@
+formatVersion: 1
+name: mysql-MSmode
+version: 2
+description: 'MYSQL Application based on Master-Slave Mode, Designed by Antares.Lyu from ECCOM'
+inputs:
+  image:
+    type: string
+    enum:
+      - img-centos77
+    description: Image/OS required
+    title: Image/OS
+    default: img-centos77
+  flavor:
+    type: string
+    enum:
+      - Tiny(only for test)
+      - Small
+      - Medium
+      - Large
+    description: Size of Mysql Nodes
+    title: Node Size
+    default: Small
+  osusername:
+    type: string
+    description: Please create a new OS user
+    title: OS User Name
+    default: docker
+  osuserpasswd:
+    type: string
+    description: Please input the password of OS User
+    title: OS User Password
+    default: D0cker@123
+  dbusername:
+    type: string
+    description: Please create a new MYSQL user
+    title: MYSQL User Name
+    default: docker
+  dbuserpasswd:
+    type: string
+    description: Please input the password of MYSQL User
+    title: MYSQL User Password
+    default: D0cker@123
+  dbrootpasswd:
+    type: string
+    description: Please input the password of MYSQL root user
+    title: MYSQL Root User Password
+    default: D0cker@123
+  dbname:
+    type: string
+    description: Please input the name of database
+    title: MYSQL Database Name
+    default: database001
+resources:
+  Mysql-Node-Network:
+    type: Cloud.NSX.Network
+    metadata:
+      layoutPosition:
+        - 0
+        - 0
+    properties:
+      networkType: routed
+      constraints:
+        - tag: 'tag:netprof/nsx-ondemand-test'
+  MysqlMasterNode:
+    type: Cloud.Machine
+    metadata:
+      layoutPosition:
+        - 1
+        - 0
+    properties:
+      name: MasterNode
+      constraints:
+        - tag: Project-Nellie-Test
+      flavor: '${input.flavor}'
+      image: '${input.image}'
+      networks:
+        - network: '${resource["Mysql-Node-Network"].id}'
+          assignment: static
+      cloudConfig: |
+        #cloudconfig
+        repo_update: true
+        repo_upgrade: all
+        package_update: true
+        package_upgrade: all
+        runcmd:
+         #Create OS User and Set Password
+         - osusername=${input.osusername}
+         - useradd -s /bin/bash $osusername
+         - echo '${input.osuserpasswd}'|sudo passwd --stdin $osusername
+         #Install Mysql Application
+         - wget http://repo.mysql.com/mysql-community-release-el7-5.noarch.rpm
+         - rpm -ivh mysql-community-release-el7-5.noarch.rpm
+         - yum install -y mysql-server
+         - systemctl enable mysqld
+         - systemctl restart mysqld
+         #Change Mysql Root Password
+         - touch /tmp/mysql.init.txt
+         - dbrootpasswd='${input.dbrootpasswd}'
+         - echo "use mysql;">>/tmp/mysql.init.txt
+         - echo "update user set password=password('$dbrootpasswd') where user='root';">>/tmp/mysql.init.txt
+         - echo 'flush privileges;'>>/tmp/mysql.init.txt
+         - echo 'exit'>>/tmp/mysql.init.txt
+         - mysql -uroot </tmp/mysql.init.txt
+         - systemctl restart mysqld
+         #Config Root User Remote Access
+         - touch /tmp/mysql.conf.txt
+         - echo "GRANT ALL PRIVILEGES ON *.* TO root@'%' IDENTIFIED BY '$dbrootpasswd';">>/tmp/mysql.conf.txt
+         - echo "flush privileges;">>/tmp/mysql.conf.txt
+         - echo "exit">>/tmp/mysql.conf.txt
+         - mysql -u root -p$dbrootpasswd </tmp/mysql.conf.txt
+         - systemctl restart mysqld
+         #Config my.cnf configuration file
+         - nodeip=`ifconfig | grep broadcast | awk "NR==1" | awk -F" " '{print $2}'`
+         #- echo $nodeip >/tmp/mysql.nodeip.txt
+         - nodeid=`echo $nodeip | cut -d . -f 4`
+         #- echo $nodeid >/tmp/mysql.nodeid.txt
+         #- sed -i "/sql_mode*/a\init_connect='SET NAMES utf8'" /etc/my.cnf         
+         #- sed -i "/sql_mode*/a\character_set_server=utf8" /etc/my.cnf
+         - sed -i "/sql_mode*/a\binlog_ignore_db=performance_schema" /etc/my.cnf
+         - sed -i "/sql_mode*/a\binlog_ignore_db=information_schema" /etc/my.cnf
+         - sed -i "/sql_mode*/a\binlog_ignore_db=mysql" /etc/my.cnf
+         - sed -i "/sql_mode*/a\expire-logs-days=10" /etc/my.cnf
+         - sed -i "/sql_mode*/a\log_bin=mysql-bin" /etc/my.cnf
+         - sed -i "/sql_mode*/a\server_id=$nodeid" /etc/my.cnf
+         - systemctl restart mysqld
+         #Delete Middle File
+         - rm -f /tmp/mysql.init.txt
+         - rm -f /tmp/mysql.conf.txt
+         #- rm -f /tmp/mysql.nodeip.txt
+         #- rm -f /tmp/mysql.nodeid.txt
+  MysqlSlaveNode:
+    type: Cloud.Machine
+    dependsOn:
+      - MysqlMasterNode
+    metadata:
+      layoutPosition:
+        - 1
+        - 1
+    properties:
+      name: SlaveNode
+      constraints:
+        - tag: Project-Nellie-Test
+      flavor: '${input.flavor}'
+      image: '${input.image}'
+      networks:
+        - network: '${resource["Mysql-Node-Network"].id}'
+          assignment: static
+      cloudConfig: |
+        #cloudconfig
+        repo_update: true
+        repo_upgrade: all
+        package_update: true
+        package_upgrade: all
+        runcmd:
+         #Create OS User and Set Password
+         - osusername=${input.osusername}
+         - useradd -s /bin/bash $osusername
+         - echo '${input.osuserpasswd}'|sudo passwd --stdin $osusername
+         #Install Mysql Application
+         - wget http://repo.mysql.com/mysql-community-release-el7-5.noarch.rpm
+         - rpm -ivh mysql-community-release-el7-5.noarch.rpm
+         - yum install -y mysql-server
+         - systemctl enable mysqld
+         - systemctl restart mysqld
+         #Change Mysql Root Password
+         - touch /tmp/mysql.init.txt
+         - dbrootpasswd='${input.dbrootpasswd}'
+         - echo 'use mysql;'>>/tmp/mysql.init.txt
+         - echo "update user set password=password('$dbrootpasswd') where user='root';">>/tmp/mysql.init.txt
+         - echo 'flush privileges;'>>/tmp/mysql.init.txt
+         - echo 'exit'>>/tmp/mysql.init.txt
+         - mysql -uroot </tmp/mysql.init.txt
+         - systemctl restart mysqld
+         #Config my.cnf configuration file
+         - nodeip=`ifconfig | grep broadcast | awk "NR==1" | awk -F" " '{print $2}'`
+         #- echo $nodeip >/tmp/mysql.nodeip.txt
+         - nodeid=`echo $nodeip | cut -d . -f 4`
+         #- echo $nodeid >/tmp/mysql.nodeid.txt
+         - dbname='${input.dbname}'
+         - sed -i "/sql_mode*/a\log_bin=mysql-bin" /etc/my.cnf
+         - sed -i "/sql_mode*/a\server_id=$nodeid" /etc/my.cnf
+         #- sed -i "/sql_mode*/a\binlog_do_db=$dbname" /etc/my.cnf
+         - systemctl restart mysqld
+         #Congig Database Sync
+         - Mhost=${resource.MysqlMasterNode.networks[0].address}
+         #- echo $Mhost >/tmp/mysql.masternodeip.txt
+         #- Muser=${input.dbusername}
+         - Muser=root
+         #- Mpassword='${input.dbuserpasswd}'
+         - Mpassword='${input.dbrootpasswd}'
+         - Bininfo=$(mysql -uroot -p$dbrootpasswd -h$Mhost -e "show master status;")
+         - Mlogfile=$(echo $Bininfo | awk '{print $6}')
+         - Mlogpos=$(echo $Bininfo | awk '{print $7}')
+         - touch /tmp/mysql.dbsync.txt
+         - echo "change master to master_host='$Mhost',master_user='$Muser',master_password='$Mpassword',master_log_file='$Mlogfile',master_log_pos=$Mlogpos;" >>/tmp/mysql.dbsync.txt
+         - echo "start slave;" >>/tmp/mysql.dbsync.txt
+         - echo "exit" >>tmp/mysql.dbsync.txt
+         - mysql -uroot -p$dbrootpasswd </tmp/mysql.dbsync.txt
+         #Create Database, DB Admin User Name and Set DB Admin User Password on Master Node
+         - touch /tmp/mysql.create.txt
+         - dbusername='${input.dbusername}'
+         - dbuserpasswd='${input.dbuserpasswd}'
+         - echo "create database $dbname;">>/tmp/mysql.create.txt
+         - echo "use $dbname;">>/tmp/mysql.create.txt
+         - echo "CREATE TABLE employees (id int(11) primary key auto_increment,name varchar(100),address varchar(255),salary int(10));">>/tmp/mysql.create.txt
+         - echo "INSERT INTO employees (id,name,address,salary) VALUES(1,'Nellie','PUDONG,SH,CN',15000),(2,'Docker','YANGPU,SH,CN',6500),(3,'Flannel','MINHANG,SH,CN',8000);">>/tmp/mysql.create.txt
+         - echo "GRANT ALL PRIVILEGES ON $dbname.* TO $dbusername@'localhost' IDENTIFIED BY '$dbuserpasswd';">>/tmp/mysql.create.txt
+         - echo "GRANT ALL PRIVILEGES ON $dbname.* TO $dbusername@'%' IDENTIFIED BY '$dbuserpasswd';">>/tmp/mysql.create.txt
+         - echo "flush privileges;">>/tmp/mysql.create.txt
+         - echo "exit">>/tmp/mysql.create.txt
+         - mysql -u root -p$dbrootpasswd -h$Mhost </tmp/mysql.create.txt
+         #DB Admin User Name and Set DB Admin User Password
+         - dbusername='${input.dbusername}'
+         - dbuserpasswd='${input.dbuserpasswd}'
+         - touch /tmp/mysql.setpw.txt
+         - echo "GRANT ALL PRIVILEGES ON $dbname.* TO $dbusername@'localhost' IDENTIFIED BY '$dbuserpasswd';">>/tmp/mysql.setpw.txt
+         - echo "GRANT ALL PRIVILEGES ON $dbname.* TO $dbusername@'%' IDENTIFIED BY '$dbuserpasswd';">>/tmp/mysql.setpw.txt
+         - echo "flush privileges;">>/tmp/mysql.setpw.txt
+         - echo "exit">>/tmp/mysql.setpw.txt
+         - mysql -uroot -p$dbrootpasswd </tmp/mysql.setpw.txt
+         - systemctl restart mysqld
+         #Delete Middle File
+         - rm -f /tmp/mysql.init.txt
+         #- rm -f /tmp/mysql.nodeip.txt
+         #- rm -f /tmp/mysql.nodeid.txt
+         - rm -f /tmp/mysql.masternodeip.txt
+         - rm -f /tmp/mysql.dbsync.txt
+         - rm -f /tmp/mysql.create.txt
+         - rm -f /tmp/mysql.setpw.txt
